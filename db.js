@@ -1,6 +1,7 @@
 import duckdb from 'duckdb';
 
 let dbInstance = null;
+let connection = null; // ✅ SINGLE CONNECTION
 let tableLoaded = false;
 let loadingPromise = null;
 
@@ -12,8 +13,11 @@ export function getDB() {
 }
 
 export async function getConnection() {
-  const db = getDB();
-  return db.connect(); // ✅ new connection per request
+  if (!connection) {
+    const db = getDB();
+    connection = db.connect(); // ✅ REUSE SAME CONNECTION
+  }
+  return connection;
 }
 
 export async function loadParquetOnce(conn) {
@@ -25,7 +29,7 @@ export async function loadParquetOnce(conn) {
     console.log('📦 Loading parquet...');
 
     conn.run(`
-      CREATE TABLE properties AS 
+      CREATE TABLE IF NOT EXISTS properties AS 
       SELECT * FROM read_parquet('https://pub-465091b295bd4eceb75d79e289a45c27.r2.dev/properties_final.parquet')
     `, (err) => {
       if (err) {
