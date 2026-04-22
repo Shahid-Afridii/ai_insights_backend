@@ -7,8 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-let tablePromise = null;
-
 /* ================= HELPERS ================= */
 
 function parseMoney(value) {
@@ -64,23 +62,10 @@ async function readRelevantRows(property) {
     };
   }
 
-  /* ================= LOAD PARQUET ONCE ================= */
+  // ✅ Only change: direct call (no wrapper)
+  await loadParquetOnce(conn);
 
-  if (!tablePromise) {
-    tablePromise = new Promise(async (resolve, reject) => {
-      try {
-        await loadParquetOnce(conn);
-        resolve(true);
-      } catch (err) {
-        tablePromise = null;
-        reject(err);
-      }
-    });
-  }
-
-  await tablePromise;
-
-  /* ================= QUERY ================= */
+  /* ================= QUERY (UNCHANGED) ================= */
 
   const query = `
     WITH base AS (
@@ -112,7 +97,7 @@ async function readRelevantRows(property) {
 
   const rows = rawRows.map(normalizeRow);
 
-  /* ================= CLASSIFY ================= */
+  /* ================= CLASSIFY (UNCHANGED) ================= */
 
   const exactMatches = [];
   const streetMatches = [];
@@ -154,7 +139,7 @@ async function readRelevantRows(property) {
     }
   });
 
-  /* ================= DEDUPE ================= */
+  /* ================= DEDUPE (UNCHANGED) ================= */
 
   const uniqueMap = new Map();
 
@@ -178,84 +163,70 @@ async function readRelevantRows(property) {
     rows: finalRows,
     totalMatched: finalRows.length,
     allRows: finalRows,
-
     exactMatches,
     streetMatches,
     areaMatches,
-
     counts,
-
     matchedBy:
       exactMatches.length > 0
         ? 'Exact Match'
         : streetMatches.length > 0
         ? 'Street Match'
         : 'Area Match',
-
     strictMode: exactMatches.length > 0 || streetMatches.length > 0,
     strictCount: exactMatches.length + streetMatches.length,
     areaCount: areaMatches.length,
   };
 }
+
+/* ================= AREA MATCH (UNCHANGED) ================= */
+
 async function readAreaRows(areaInput) {
   const conn = await getConnection();
 
+  const normalize = (v = '') =>
+    String(v).toUpperCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
-    const normalize = (v = '') =>
-      String(v).toUpperCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const safe = (v = '') => v.replace(/'/g, "''");
 
-    const safe = (v = '') => v.replace(/'/g, "''");
+  const inputArea = normalize(areaInput);
+  if (!inputArea) return [];
 
-    const inputArea = normalize(areaInput);
-    if (!inputArea) return [];
+  await loadParquetOnce(conn);
 
-    await loadParquetOnce(conn);
+  const query = `
+    SELECT pr, y, ty, pc, t
+    FROM properties
+    WHERE upper(t) = '${safe(inputArea)}'
+      AND pr BETWEEN 30000 AND 2000000
+    LIMIT 50000
+  `;
 
-    const query = `
-      SELECT
-        pr,
-        y,
-        ty,
-        pc,
-        t
-      FROM properties
-      WHERE 
-        upper(t) = '${safe(inputArea)}'
-        AND pr BETWEEN 30000 AND 2000000
-      LIMIT 50000
-    `;
+  const rawRows = await new Promise((resolve, reject) => {
+    conn.all(query, (err, res) => (err ? reject(err) : resolve(res)));
+  });
 
-    const rawRows = await new Promise((resolve, reject) => {
-      conn.all(query, (err, res) => (err ? reject(err) : resolve(res)));
-    });
-
-    return rawRows.map((row) => ({
-      year: Number(row.y),
-      price: Number(row.pr),
-      town: row.t,
-      postcode: row.pc,
-      property: row.ty,
-    }));
-  
+  return rawRows.map((row) => ({
+    year: Number(row.y),
+    price: Number(row.pr),
+    town: row.t,
+    postcode: row.pc,
+    property: row.ty,
+  }));
 }
+
 /* ================= API ================= */
 
 app.post('/predict', async (req, res) => {
   try {
-    const property = req.body;
-
-    const result = await readRelevantRows(property);
-
-    return res.json({
-      success: true,
-      ...result,
-    });
-
+    const result = await readRelevantRows(req.body);
+    res.json({ success: true, ...result });
   } catch (err) {
     console.error('❌ ERROR:', err);
     res.status(500).json({ error: err.message });
   }
 });
+
 app.post('/area-predict', async (req, res) => {
   try {
     const { area } = req.body;
@@ -273,10 +244,17 @@ app.post('/area-predict', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 /* ================= START ================= */
 
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
+
+  // ✅ preload parquet (important)
+  const conn = await getConnection();
+  await loadParquetOnce(conn);
+
+  console.log('🔥 Parquet preloaded');
 });
