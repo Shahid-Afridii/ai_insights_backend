@@ -21,7 +21,7 @@ function normalizeRow(row) {
 async function readRelevantRows(property) {
   const conn = await getConnection();
 
-  try {
+  
     const normalize = (v = '') =>
       String(v).toUpperCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -81,9 +81,7 @@ async function readRelevantRows(property) {
       totalMatched: rows.length,
       allRows: rows,
     };
-  } finally {
-    conn.close(); // ✅ IMPORTANT
-  }
+  
 }
 
 /* ================= AREA MATCH ================= */
@@ -91,7 +89,7 @@ async function readRelevantRows(property) {
 async function readAreaRows(areaInput) {
   const conn = await getConnection();
 
-  try {
+
     const normalize = (v = '') =>
       String(v).toUpperCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -127,9 +125,7 @@ async function readAreaRows(areaInput) {
       postcode: row.pc,
       property: row.ty,
     }));
-  } finally {
-    conn.close(); // ✅ IMPORTANT
-  }
+  
 }
 
 /* ================= API ================= */
