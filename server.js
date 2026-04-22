@@ -197,7 +197,47 @@ async function readRelevantRows(property) {
     areaCount: areaMatches.length,
   };
 }
+async function readAreaRows(areaInput) {
+  const conn = await getConnection();
 
+
+    const normalize = (v = '') =>
+      String(v).toUpperCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const safe = (v = '') => v.replace(/'/g, "''");
+
+    const inputArea = normalize(areaInput);
+    if (!inputArea) return [];
+
+    await loadParquetOnce(conn);
+
+    const query = `
+      SELECT
+        pr,
+        y,
+        ty,
+        pc,
+        t
+      FROM properties
+      WHERE 
+        upper(t) = '${safe(inputArea)}'
+        AND pr BETWEEN 30000 AND 2000000
+      LIMIT 50000
+    `;
+
+    const rawRows = await new Promise((resolve, reject) => {
+      conn.all(query, (err, res) => (err ? reject(err) : resolve(res)));
+    });
+
+    return rawRows.map((row) => ({
+      year: Number(row.y),
+      price: Number(row.pr),
+      town: row.t,
+      postcode: row.pc,
+      property: row.ty,
+    }));
+  
+}
 /* ================= API ================= */
 
 app.post('/predict', async (req, res) => {
@@ -216,7 +256,23 @@ app.post('/predict', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+app.post('/area-predict', async (req, res) => {
+  try {
+    const { area } = req.body;
+    if (!area) return res.status(400).json({ error: 'Area required' });
 
+    const rows = await readAreaRows(area);
+
+    res.json({
+      success: true,
+      rows,
+      matchedCount: rows.length,
+    });
+  } catch (err) {
+    console.error('❌ AREA ERROR:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 /* ================= START ================= */
 
 const PORT = process.env.PORT || 3001;
