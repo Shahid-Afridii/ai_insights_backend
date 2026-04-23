@@ -6,7 +6,8 @@ import { getConnection, loadParquetOnce } from './db.js';
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+let areaCache = new Map();
+let propertyCache = new Map();
 /* ================= HELPERS ================= */
 
 function parseMoney(value) {
@@ -182,6 +183,14 @@ async function readRelevantRows(property) {
 /* ================= AREA MATCH (UNCHANGED) ================= */
 
 async function readAreaRows(areaInput) {
+  const key = String(areaInput).toUpperCase();
+
+  // ⚡ CACHE HIT
+  if (areaCache.has(key)) {
+    console.log('⚡ AREA CACHE HIT');
+    return areaCache.get(key);
+  }
+
   const conn = await getConnection();
 
   const normalize = (v = '') =>
@@ -206,13 +215,18 @@ async function readAreaRows(areaInput) {
     conn.all(query, (err, res) => (err ? reject(err) : resolve(res)));
   });
 
-  return rawRows.map((row) => ({
+  const rows = rawRows.map((row) => ({
     year: Number(row.y),
     price: Number(row.pr),
     town: row.t,
     postcode: row.pc,
     property: row.ty,
   }));
+
+  // ✅ SAVE CACHE
+  areaCache.set(key, rows);
+
+  return rows;
 }
 
 /* ================= API ================= */
